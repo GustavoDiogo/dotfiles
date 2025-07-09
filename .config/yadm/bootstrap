@@ -1,17 +1,91 @@
 #!/bin/bash
 set -e
 
-echo "Running YADM bootstrap script..."
+echo "🚀 Running YADM bootstrap script..."
 
 sudo apt update
-sudo apt install -y zsh git curl stow
 
-# Setup Zsh as default shell
-chsh -s "$(which zsh)"
+echo "Installing some CLI Tools..."
+sudo apt install -y vim \ 
+curl \ 
+wget \
+unzip \
+build-essential
 
-echo "Installing Oh My Zsh..."
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+echo "Installing Shell & Terminal utilities..."
+sudo apt install -y zsh \
+stow \
+zsh-syntax-highlighting \
+zsh-autosuggestions 
 
-git clone https://github.com/spaceship-prompt/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1
+if ! command -v docker &> /dev/null; then
+    echo "Installing Docker..."
+    sudo apt install -y docker.io docker-compose
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    sudo usermod -aG docker $USER
+    echo "Docker installed and user added to docker group. Please log out and back in for
+    changes to take effect."
+else
+    echo "Docker is already installed. Skipping."
+fi
 
-ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
+if [ "$SHELL" != "$(which zsh)" ]; then
+  echo "Setting up Zsh as the default shell..."
+  chsh -s "$(which zsh)"
+else
+  echo "Zsh is already the default shell. Skipping."
+fi
+
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  echo "Installing Oh My Zsh..."
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+else
+  echo "Oh My Zsh already installed. Skipping."
+fi
+
+if [ ! -d "$ZSH_CUSTOM/themes/spaceship-prompt" ]; then
+  echo "Downloading and installing Spaceship Prompt theme..."
+  git clone https://github.com/spaceship-prompt/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1
+else
+  echo "Spaceship Prompt theme already installed. Skipping clone."
+fi
+
+if [ ! -L "$ZSH_CUSTOM/themes/spaceship.zsh-theme" ]; then
+  ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
+else
+  echo "Spaceship Prompt symlink already exists. Skipping."
+fi
+
+if [ ! -d "$HOME/.nvm" ]; then
+  echo "📦 Installing NVM and Node.js..."
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+  export NVM_DIR="$HOME/.nvm"
+  source "$NVM_DIR/nvm.sh"
+  nvm install --lts
+  nvm use --lts
+else
+  echo "NVM is already installed. Skipping."
+fi
+
+if ! command -v code &> /dev/null; then
+    sudo apt-get install wget gpg
+    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
+    sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
+    echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" |sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+    rm -f packages.microsoft.gpg
+    sudo apt install apt-transport-https
+    sudo apt update
+    sudo apt install code 
+else 
+    echo "Visual Studio Code is already installed. Skipping."
+fi
+
+if ! command -v discord &> /dev/null; then
+    echo "Installing Discord..."
+    sudo snap install discord
+else
+    echo "Discord is already installed. Skipping."
+fi
+
+echo "✅ Bootstrap complete."
