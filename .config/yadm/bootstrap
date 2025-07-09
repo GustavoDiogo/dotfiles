@@ -6,7 +6,7 @@ echo "🚀 Running YADM bootstrap script..."
 sudo apt update
 
 echo "Installing some CLI Tools..."
-sudo apt install -y vim \ 
+sudo apt install -y vim \
 curl \ 
 wget \
 unzip \
