@@ -88,4 +88,11 @@ else
     echo "Discord is already installed. Skipping."
 fi
 
+if ! command -v brave-browser &> /dev/null; then
+    echo "Installing Brave Browser..."
+    curl -fsS https://dl.brave.com/install.sh | sh
+else
+    echo "Brave Browser is already installed. Skipping."
+fi
+
 echo "✅ Bootstrap complete."
