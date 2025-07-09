@@ -225,6 +225,9 @@ else
   sed -i 's/^show_gpu=.*/show_gpu=true/' "$MULTILOAD_CONF"
 fi
 
+pkill indicator-multiload || true
+nohup indicator-multiload >/dev/null 2>&1 &
+
 info "Setting GNOME favorites..."
 
 gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
