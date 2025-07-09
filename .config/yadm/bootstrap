@@ -154,6 +154,28 @@ if [ -f /var/lib/snapd/desktop/applications/spotify_spotify.desktop ]; then
   cp /var/lib/snapd/desktop/applications/spotify_spotify.desktop ~/.local/share/applications/spotify.desktop
 fi
 
+# Install Psensor and dependencies for hardware monitoring
+if ! command -v psensor &> /dev/null; then
+    info "Installing Psensor and hardware monitoring tools..."
+    sudo apt install -y psensor lm-sensors hddtemp
+    sudo sensors-detect --auto || true
+    sudo systemctl enable --now lm-sensors.service || true
+
+    # Ensure Psensor config exists
+    mkdir -p ~/.config/psensor
+    if [ ! -f ~/.config/psensor/psensor.conf ]; then
+      psensor & sleep 3; pkill psensor
+    fi
+
+    # Set Psensor to show in notification area (system tray) and start hidden
+    sed -i 's/^show_in_notification_area=.*/show_in_notification_area=1/' ~/.config/psensor/psensor.conf
+    sed -i 's/^start_hidden=.*/start_hidden=1/' ~/.config/psensor/psensor.conf
+    grep -q '^show_in_notification_area=' ~/.config/psensor/psensor.conf || echo 'show_in_notification_area=1' >> ~/.config/psensor/psensor.conf
+    grep -q '^start_hidden=' ~/.config/psensor/psensor.conf || echo 'start_hidden=1' >> ~/.config/psensor/psensor.conf
+else
+    success "Psensor is already installed. Skipping."
+fi
+
 info "Setting GNOME favorites..."
 
 gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
