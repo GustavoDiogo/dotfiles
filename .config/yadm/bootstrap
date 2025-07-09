@@ -59,7 +59,7 @@ else
     success "Docker is already installed. Skipping."
 fi
 
-if [ "$SHELL" != "$(which zsh)" ]; then
+if ! grep -qE "^$(whoami):.*:$(which zsh)$" /etc/passwd; then
   info "Setting up Zsh as the default shell..."
   chsh -s "$(which zsh)"
 else
