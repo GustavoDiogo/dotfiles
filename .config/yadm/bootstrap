@@ -157,7 +157,7 @@ fi
 # Install Psensor and dependencies for hardware monitoring
 if ! command -v psensor &> /dev/null; then
     info "Installing Psensor and hardware monitoring tools..."
-    sudo apt install -y psensor lm-sensors hddtemp
+    sudo apt install -y psensor lm-sensors
     sudo sensors-detect --auto || true
     sudo systemctl enable --now lm-sensors.service || true
 
