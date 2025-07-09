@@ -156,6 +156,6 @@ fi
 
 info "Setting GNOME favorites..."
 
-gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'code.desktop', 'discord.desktop', 'terminator.desktop', 'spotify.desktop']"
+gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
 
 success "🎉 Bootstrap complete."
