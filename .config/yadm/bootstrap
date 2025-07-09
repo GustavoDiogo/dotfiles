@@ -164,7 +164,7 @@ if ! command -v psensor &> /dev/null; then
     # Ensure Psensor config exists
     mkdir -p ~/.config/psensor
     if [ ! -f ~/.config/psensor/psensor.conf ]; then
-      psensor & sleep 3; pkill psensor
+      psensor & sleep 10; pkill psensor
     fi
 
     # Set Psensor to show in notification area (system tray) and start hidden
@@ -176,23 +176,16 @@ else
     success "Psensor is already installed. Skipping."
 fi
 
-# Install GNOME Shell Extension: System Monitor (gnome-shell-extension-system-monitor)
-if ! dpkg -s gnome-shell-extension-system-monitor &> /dev/null; then
-    info "Installing GNOME System Monitor extension..."
-    sudo apt install -y gnome-shell-extension-system-monitor
-    # Enable the extension (may require a GNOME Shell restart to appear)
-    gnome-extensions enable system-monitor@paradoxxx.zero.gmail.com || true
-    # Configure System Monitor extension for top bar (CPU %, GPU %, Memory, Load)
-    SYSTEM_MONITOR_SCHEMA="org.gnome.shell.extensions.system-monitor"
-    gsettings set $SYSTEM_MONITOR_SCHEMA cpu-usage true
-    # GPU usage (if supported by your hardware/driver)
-    gsettings set $SYSTEM_MONITOR_SCHEMA gpu-usage true || true
-    gsettings set $SYSTEM_MONITOR_SCHEMA memory-usage true
-    gsettings set $SYSTEM_MONITOR_SCHEMA load-average true
-else
-    success "GNOME System Monitor extension is already installed. Skipping."
-fi
 
+# Add Ubuntu's default System Monitor (gnome-system-monitor) to autostart and favorites
+if ! command -v gnome-system-monitor &> /dev/null; then
+    info "Installing GNOME System Monitor..."
+    sudo apt install -y gnome-system-monitor
+    mkdir -p ~/.config/autostart
+    cp /usr/share/applications/gnome-system-monitor.desktop ~/.config/autostart/
+else
+    success "GNOME System Monitor is already installed. Skipping."
+fi
 
 info "Setting GNOME favorites..."
 
