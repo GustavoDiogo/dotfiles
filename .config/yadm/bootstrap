@@ -176,17 +176,6 @@ else
     success "Psensor is already installed. Skipping."
 fi
 
-
-# Add Ubuntu's default System Monitor (gnome-system-monitor) to autostart and favorites
-if ! command -v gnome-system-monitor &> /dev/null; then
-    info "Installing GNOME System Monitor..."
-    sudo apt install -y gnome-system-monitor
-    mkdir -p ~/.config/autostart
-    cp /usr/share/applications/gnome-system-monitor.desktop ~/.config/autostart/
-else
-    success "GNOME System Monitor is already installed. Skipping."
-fi
-
 # Install indicator-multiload for top panel system monitoring
 if ! dpkg -s indicator-multiload &> /dev/null; then
     info "Installing indicator-multiload (system load indicator)..."
@@ -197,42 +186,6 @@ if ! dpkg -s indicator-multiload &> /dev/null; then
 else
     success "indicator-multiload is already installed. Skipping."
 fi
-
-# Configure indicator-multiload to show custom indicator items in the top panel
-MULTILOAD_CONF=~/.config/indicator-multiload.conf
-if [ ! -f "$MULTILOAD_CONF" ]; then
-  cat > "$MULTILOAD_CONF" <<EOF
-[general]
-show_cpu=true
-show_mem=true
-show_net=true
-show_load=true
-show_swap=true
-show_disk=false
-show_proc=false
-show_fs=false
-show_gpu=true
-indicator_items=CPU \\$(percent(cpu.inuse)) Mem \\$(size(mem.user)) Load \\$(decimals(load.avg,2))
-EOF
-else
-  sed -i 's/^show_cpu=.*/show_cpu=true/' "$MULTILOAD_CONF"
-  sed -i 's/^show_mem=.*/show_mem=true/' "$MULTILOAD_CONF"
-  sed -i 's/^show_net=.*/show_net=true/' "$MULTILOAD_CONF"
-  sed -i 's/^show_load=.*/show_load=true/' "$MULTILOAD_CONF"
-  sed -i 's/^show_swap=.*/show_swap=true/' "$MULTILOAD_CONF"
-  sed -i 's/^show_disk=.*/show_disk=false/' "$MULTILOAD_CONF"
-  sed -i 's/^show_proc=.*/show_proc=false/' "$MULTILOAD_CONF"
-  sed -i 's/^show_fs=.*/show_fs=false/' "$MULTILOAD_CONF"
-  sed -i 's/^show_gpu=.*/show_gpu=true/' "$MULTILOAD_CONF"
-  if grep -q '^indicator_items=' "$MULTILOAD_CONF"; then
-    sed -i 's|^indicator_items=.*|indicator_items=CPU \\$(percent(cpu.inuse)) Mem \\$(size(mem.user)) Load \\$(decimals(load.avg,2))|' "$MULTILOAD_CONF"
-  else
-    echo 'indicator_items=CPU \\$(percent(cpu.inuse)) Mem \\$(size(mem.user)) Load \\$(decimals(load.avg,2))' >> "$MULTILOAD_CONF"
-  fi
-fi
-
-pkill indicator-multiload || true
-nohup indicator-multiload >/dev/null 2>&1 &
 
 info "Setting GNOME favorites..."
 
