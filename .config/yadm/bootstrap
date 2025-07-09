@@ -63,6 +63,8 @@ fi
 
 if [ ! -d "$ZSH_CUSTOM/themes/spaceship-prompt" ]; then
   echo "Downloading and installing Spaceship Prompt theme..."
+  ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+  mkdir -p "$ZSH_CUSTOM/themes"
   chown -R "$USER":"$USER" "$ZSH_CUSTOM"
   git clone https://github.com/spaceship-prompt/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1
 else
