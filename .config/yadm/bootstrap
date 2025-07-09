@@ -198,7 +198,7 @@ else
     success "indicator-multiload is already installed. Skipping."
 fi
 
-# Configure indicator-multiload to show CPU, Memory, Network, and Load in the top panel
+# Configure indicator-multiload to show custom indicator items in the top panel
 MULTILOAD_CONF=~/.config/indicator-multiload.conf
 if [ ! -f "$MULTILOAD_CONF" ]; then
   cat > "$MULTILOAD_CONF" <<EOF
@@ -212,6 +212,7 @@ show_disk=false
 show_proc=false
 show_fs=false
 show_gpu=true
+indicator_items=CPU \\$(percent(cpu.inuse)) Mem \\$(size(mem.user)) Load \\$(decimals(load.avg,2))
 EOF
 else
   sed -i 's/^show_cpu=.*/show_cpu=true/' "$MULTILOAD_CONF"
@@ -223,6 +224,11 @@ else
   sed -i 's/^show_proc=.*/show_proc=false/' "$MULTILOAD_CONF"
   sed -i 's/^show_fs=.*/show_fs=false/' "$MULTILOAD_CONF"
   sed -i 's/^show_gpu=.*/show_gpu=true/' "$MULTILOAD_CONF"
+  if grep -q '^indicator_items=' "$MULTILOAD_CONF"; then
+    sed -i 's|^indicator_items=.*|indicator_items=CPU \\$(percent(cpu.inuse)) Mem \\$(size(mem.user)) Load \\$(decimals(load.avg,2))|' "$MULTILOAD_CONF"
+  else
+    echo 'indicator_items=CPU \\$(percent(cpu.inuse)) Mem \\$(size(mem.user)) Load \\$(decimals(load.avg,2))' >> "$MULTILOAD_CONF"
+  fi
 fi
 
 pkill indicator-multiload || true
