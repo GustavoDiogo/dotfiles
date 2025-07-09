@@ -34,7 +34,7 @@ success "All CLI Tools already installed. Skipping."
 fi
 
 # Install Shell & Terminal utilities only if not already installed
-shell_utils=(zsh stow zsh-syntax-highlighting zsh-autosuggestions)
+shell_utils=(terminator zsh stow zsh-syntax-highlighting zsh-autosuggestions)
 shell_utils_to_install=()
 for util in "${shell_utils[@]}"; do
   if ! dpkg -s "$util" &> /dev/null; then
