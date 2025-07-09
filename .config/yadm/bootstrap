@@ -176,6 +176,24 @@ else
     success "Psensor is already installed. Skipping."
 fi
 
+# Install GNOME Shell Extension: System Monitor (gnome-shell-extension-system-monitor)
+if ! dpkg -s gnome-shell-extension-system-monitor &> /dev/null; then
+    info "Installing GNOME System Monitor extension..."
+    sudo apt install -y gnome-shell-extension-system-monitor
+    # Enable the extension (may require a GNOME Shell restart to appear)
+    gnome-extensions enable system-monitor@paradoxxx.zero.gmail.com || true
+    # Configure System Monitor extension for top bar (CPU %, GPU %, Memory, Load)
+    SYSTEM_MONITOR_SCHEMA="org.gnome.shell.extensions.system-monitor"
+    gsettings set $SYSTEM_MONITOR_SCHEMA cpu-usage true
+    # GPU usage (if supported by your hardware/driver)
+    gsettings set $SYSTEM_MONITOR_SCHEMA gpu-usage true || true
+    gsettings set $SYSTEM_MONITOR_SCHEMA memory-usage true
+    gsettings set $SYSTEM_MONITOR_SCHEMA load-average true
+else
+    success "GNOME System Monitor extension is already installed. Skipping."
+fi
+
+
 info "Setting GNOME favorites..."
 
 gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
