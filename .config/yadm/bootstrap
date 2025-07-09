@@ -187,6 +187,44 @@ else
     success "GNOME System Monitor is already installed. Skipping."
 fi
 
+# Install indicator-multiload for top panel system monitoring
+if ! dpkg -s indicator-multiload &> /dev/null; then
+    info "Installing indicator-multiload (system load indicator)..."
+    sudo apt install -y indicator-multiload
+    # Add to startup applications
+    mkdir -p ~/.config/autostart
+    cp /usr/share/applications/indicator-multiload.desktop ~/.config/autostart/
+else
+    success "indicator-multiload is already installed. Skipping."
+fi
+
+# Configure indicator-multiload to show CPU, Memory, Network, and Load in the top panel
+MULTILOAD_CONF=~/.config/indicator-multiload.conf
+if [ ! -f "$MULTILOAD_CONF" ]; then
+  cat > "$MULTILOAD_CONF" <<EOF
+[general]
+show_cpu=true
+show_mem=true
+show_net=true
+show_load=true
+show_swap=true
+show_disk=false
+show_proc=false
+show_fs=false
+show_gpu=true
+EOF
+else
+  sed -i 's/^show_cpu=.*/show_cpu=true/' "$MULTILOAD_CONF"
+  sed -i 's/^show_mem=.*/show_mem=true/' "$MULTILOAD_CONF"
+  sed -i 's/^show_net=.*/show_net=true/' "$MULTILOAD_CONF"
+  sed -i 's/^show_load=.*/show_load=true/' "$MULTILOAD_CONF"
+  sed -i 's/^show_swap=.*/show_swap=true/' "$MULTILOAD_CONF"
+  sed -i 's/^show_disk=.*/show_disk=false/' "$MULTILOAD_CONF"
+  sed -i 's/^show_proc=.*/show_proc=false/' "$MULTILOAD_CONF"
+  sed -i 's/^show_fs=.*/show_fs=false/' "$MULTILOAD_CONF"
+  sed -i 's/^show_gpu=.*/show_gpu=true/' "$MULTILOAD_CONF"
+fi
+
 info "Setting GNOME favorites..."
 
 gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
