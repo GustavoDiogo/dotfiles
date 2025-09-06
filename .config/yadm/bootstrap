@@ -14,11 +14,13 @@ success() { echo -e "${GREEN}✅ $1${RESET}"; }
 warn() { echo -e "${YELLOW}⚠️  $1${RESET}"; }
 error() { echo -e "${RED}❌ $1${RESET}"; }
 
+trap 'error " Script failed on line $LINENO"' ERR
+
 info "🚀 Running YADM bootstrap script..."
 
 sudo apt update
 
-# Install CLI tools only if not already installed
+# Install CLI tools
 cli_tools=(vim curl wget build-essential)
 cli_to_install=()
 for tool in "${cli_tools[@]}"; do
@@ -27,13 +29,13 @@ for tool in "${cli_tools[@]}"; do
   fi
 done
 if [ ${#cli_to_install[@]} -ne 0 ]; then
-info "Installing CLI Tools: ${cli_to_install[*]}..."
+  info "Installing CLI Tools: ${cli_to_install[*]}..."
   sudo apt install -y "${cli_to_install[@]}"
 else
-success "All CLI Tools already installed. Skipping."
+  success "All CLI Tools already installed. Skipping."
 fi
 
-# Install Shell & Terminal utilities only if not already installed
+# Install Shell & Terminal utilities
 shell_utils=(terminator zsh stow zsh-syntax-highlighting zsh-autosuggestions)
 shell_utils_to_install=()
 for util in "${shell_utils[@]}"; do
@@ -42,23 +44,109 @@ for util in "${shell_utils[@]}"; do
   fi
 done
 if [ ${#shell_utils_to_install[@]} -ne 0 ]; then
-info "Installing Shell & Terminal utilities: ${shell_utils_to_install[*]}..."
+  info "Installing Shell & Terminal utilities: ${shell_utils_to_install[*]}..."
   sudo apt install -y "${shell_utils_to_install[@]}"
 else
-success "All Shell & Terminal utilities already installed. Skipping."
+  success "All Shell & Terminal utilities already installed. Skipping."
 fi
 
-if ! command -v docker &> /dev/null; then
-    info "Installing Docker..."
-    sudo apt install -y docker.io docker-compose
-    sudo systemctl start docker
-    sudo systemctl enable docker
-    sudo usermod -aG docker $USER
-    success "Docker installed and user added to docker group. Please log out and back in for changes to take effect."
+# --- Docker Desktop: repair if broken, then install (official recommended flow) ---
+
+# Detect if docker-desktop is in a broken "reinstreq" state
+is_dd_broken() {
+  dpkg-query -W -f='${Status}\n' docker-desktop 2>/dev/null | grep -qi 'reinstreq'
+}
+
+# Clean/purge any half-installed docker-desktop
+repair_dd_if_needed() {
+  if is_dd_broken; then
+    warn "docker-desktop package is broken (reinstreq). Attempting repair/purge..."
+
+    # Try to remove the half-installed package forcibly
+    sudo dpkg --remove --force-remove-reinstreq docker-desktop || true
+
+    # Fix broken deps and finish any pending configs
+    sudo apt-get -f install -y || true
+    sudo apt --fix-broken install -y || true
+
+    # Purge if it still exists
+    if dpkg -l | grep -q '^rc\s\+docker-desktop'; then
+      sudo dpkg -P docker-desktop || true
+    fi
+
+    # Remove leftover files/symlinks (safe to ignore if missing)
+    sudo rm -rf /opt/docker-desktop \
+                /usr/share/applications/docker-desktop.desktop \
+                /usr/local/bin/com.docker.cli \
+                /usr/bin/com.docker.cli || true
+    rm -rf "$HOME/.docker/desktop" "$HOME/.local/share/applications/docker-desktop.desktop" || true
+
+    # Clean apt metadata that might reference a bad archive
+    sudo rm -f /var/cache/apt/archives/docker-desktop*.deb || true
+    sudo apt-get update
+
+    success "Repair/purge steps completed."
+  fi
+}
+
+install_dd() {
+  info "Installing Docker Desktop..."
+
+  sudo apt-get update
+  sudo apt-get install -y ca-certificates curl gnupg apt-transport-https software-properties-common gnome-terminal
+
+  # Step 1: Setup Docker apt repo (for dependencies; this is not the Desktop repo)
+  sudo install -m 0755 -d /etc/apt/keyrings
+  if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+      | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  fi
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+  sudo apt-get update
+
+  # Step 2: Download latest Desktop .deb
+  DEB_DIR="$(mktemp -d)"
+  cd "$DEB_DIR"
+  info "Downloading Docker Desktop package..."
+  curl -fLo docker-desktop-amd64.deb "https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb"
+
+  # Optional: If you want checksum validation, uncomment:
+  # curl -fLo docker-desktop-amd64.deb.sha256 "https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb.sha256" && \
+  #   (grep docker-desktop-amd64.deb docker-desktop-amd64.deb.sha256 >/dev/null 2>&1 || \
+  #     (echo "$(cat docker-desktop-amd64.deb.sha256)  docker-desktop-amd64.deb" > docker-desktop-amd64.deb.sha256)) && \
+  #   sha256sum -c docker-desktop-amd64.deb.sha256
+
+  # Step 3: Install via apt (ignore unsandboxed warning)
+  # Using 'apt-get install ./pkg.deb' resolves and installs any missing deps.
+  sudo apt-get install -y ./docker-desktop-amd64.deb || true
+
+  # Ensure user in docker group
+  sudo usermod -aG docker "$USER" || true
+
+  cd - >/dev/null
+  rm -rf "$DEB_DIR"
+
+  success "Docker Desktop installed. Log out/in so new group memberships apply."
+}
+
+if ! command -v docker-desktop &> /dev/null; then
+  repair_dd_if_needed
+  install_dd
 else
-    success "Docker is already installed. Skipping."
+  # Even if the binary exists, verify it's not broken
+  if is_dd_broken; then
+    repair_dd_if_needed
+    install_dd
+  else
+    success "Docker Desktop is already installed. Skipping."
+  fi
 fi
 
+# --- end Docker Desktop ---
+
+# Set Zsh as default
 if ! grep -qE "^$(whoami):.*:$(which zsh)$" /etc/passwd; then
   info "Setting up Zsh as the default shell..."
   chsh -s "$(which zsh)"
@@ -66,6 +154,7 @@ else
   success "Zsh is already the default shell. Skipping."
 fi
 
+# Oh My Zsh
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
   info "Installing Oh My Zsh..."
   RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
@@ -73,6 +162,7 @@ else
   success "Oh My Zsh already installed. Skipping."
 fi
 
+# Spaceship theme
 ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 if [ ! -d "$ZSH_CUSTOM/themes/spaceship-prompt" ]; then
   info "Downloading and installing Spaceship Prompt theme..."
@@ -82,17 +172,18 @@ if [ ! -d "$ZSH_CUSTOM/themes/spaceship-prompt" ]; then
 else
   success "Spaceship Prompt theme already installed. Skipping clone."
 fi
-
 if [ ! -L "$ZSH_CUSTOM/themes/spaceship.zsh-theme" ]; then
   ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
 else
   success "Spaceship Prompt symlink already exists. Skipping."
 fi
 
+# NVM + Node.js
 if [ ! -d "$HOME/.nvm" ]; then
   info "📦 Installing NVM and Node.js..."
   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
   export NVM_DIR="$HOME/.nvm"
+  # shellcheck disable=SC1090
   source "$NVM_DIR/nvm.sh"
   nvm install --lts
   nvm use --lts
@@ -100,95 +191,97 @@ else
   success "NVM is already installed. Skipping."
 fi
 
+# Visual Studio Code
 if ! command -v code &> /dev/null; then
-    sudo apt-get install wget gpg
-    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
-    sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
-    echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" |sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
-    rm -f packages.microsoft.gpg
-    sudo apt -y install apt-transport-https
-    sudo apt update
-    sudo apt install code 
+  sudo apt-get install wget gpg -y
+  wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
+  sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
+  echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
+    | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+  rm -f packages.microsoft.gpg
+  sudo apt -y install apt-transport-https
+  sudo apt update
+  sudo apt install -y code 
 else 
-    success "Visual Studio Code is already installed. Skipping."
+  success "Visual Studio Code is already installed. Skipping."
 fi
 
+# Discord
 if ! command -v discord &> /dev/null; then
-    info "Installing Discord..."
-    sudo snap install discord
+  info "Installing Discord..."
+  sudo snap install discord
 else
-    success "Discord is already installed. Skipping."
+  success "Discord is already installed. Skipping."
 fi
 
+# Brave
 if ! command -v brave-browser &> /dev/null; then
-    info "Installing Brave Browser..."
-    curl -fsS https://dl.brave.com/install.sh | sh
+  info "Installing Brave Browser..."
+  curl -fsS https://dl.brave.com/install.sh | sh
 else
-    success "Brave Browser is already installed. Skipping."
+  success "Brave Browser is already installed. Skipping."
 fi
 
+# Chrome
 if ! command -v google-chrome &> /dev/null; then
-    info "Installing Google Chrome..."
-    wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    apt install -y ./google-chrome-stable_current_amd64.deb
-    rm google-chrome-stable_current_amd64.deb
+  info "Installing Google Chrome..."
+  wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  sudo apt install -y ./google-chrome-stable_current_amd64.deb
+  rm google-chrome-stable_current_amd64.deb
 else
-    success "Google Chrome is already installed. Skipping."
+  success "Google Chrome is already installed. Skipping."
 fi
 
-# Ensure Discord .desktop file exists for GNOME favorites
+# Ensure Discord desktop file
 if [ -f /var/lib/snapd/desktop/applications/discord_discord.desktop ]; then
   cp /var/lib/snapd/desktop/applications/discord_discord.desktop ~/.local/share/applications/discord.desktop
 fi
 
-# Install Spotify (Snap)
+# Spotify
 if ! command -v spotify &> /dev/null; then
-    info "Installing Spotify..."
-    sudo snap install spotify
+  info "Installing Spotify..."
+  sudo snap install spotify
 else
-    success "Spotify is already installed. Skipping."
+  success "Spotify is already installed. Skipping."
 fi
 
-# Ensure Spotify .desktop file exists for GNOME favorites
+# Ensure Spotify desktop file
 if [ -f /var/lib/snapd/desktop/applications/spotify_spotify.desktop ]; then
   cp /var/lib/snapd/desktop/applications/spotify_spotify.desktop ~/.local/share/applications/spotify.desktop
 fi
 
-# Install Psensor and dependencies for hardware monitoring
+# Psensor
 if ! command -v psensor &> /dev/null; then
-    info "Installing Psensor and hardware monitoring tools..."
-    sudo apt install -y psensor lm-sensors
-    sudo sensors-detect --auto || true
-    sudo systemctl enable --now lm-sensors.service || true
+  info "Installing Psensor and hardware monitoring tools..."
+  sudo apt install -y psensor lm-sensors
+  sudo sensors-detect --auto || true
+  sudo systemctl enable --now lm-sensors.service || true
 
-    # Ensure Psensor config exists
-    mkdir -p ~/.config/psensor
-    if [ ! -f ~/.config/psensor/psensor.conf ]; then
-      psensor & sleep 10; pkill psensor
-    fi
+  mkdir -p ~/.config/psensor
+  if [ ! -f ~/.config/psensor/psensor.conf ]; then
+    psensor & sleep 10; pkill psensor
+  fi
 
-    # Set Psensor to show in notification area (system tray) and start hidden
-    sed -i 's/^show_in_notification_area=.*/show_in_notification_area=1/' ~/.config/psensor/psensor.conf
-    sed -i 's/^start_hidden=.*/start_hidden=1/' ~/.config/psensor/psensor.conf
-    grep -q '^show_in_notification_area=' ~/.config/psensor/psensor.conf || echo 'show_in_notification_area=1' >> ~/.config/psensor/psensor.conf
-    grep -q '^start_hidden=' ~/.config/psensor/psensor.conf || echo 'start_hidden=1' >> ~/.config/psensor/psensor.conf
+  sed -i 's/^show_in_notification_area=.*/show_in_notification_area=1/' ~/.config/psensor/psensor.conf
+  sed -i 's/^start_hidden=.*/start_hidden=1/' ~/.config/psensor/psensor.conf
+  grep -q '^show_in_notification_area=' ~/.config/psensor/psensor.conf || echo 'show_in_notification_area=1' >> ~/.config/psensor/psensor.conf
+  grep -q '^start_hidden=' ~/.config/psensor/psensor.conf || echo 'start_hidden=1' >> ~/.config/psensor/psensor.conf
 else
-    success "Psensor is already installed. Skipping."
+  success "Psensor is already installed. Skipping."
 fi
 
-# Install indicator-multiload for top panel system monitoring
+# Indicator Multiload
 if ! dpkg -s indicator-multiload &> /dev/null; then
-    info "Installing indicator-multiload (system load indicator)..."
-    sudo apt install -y indicator-multiload
-    # Add to startup applications
-    mkdir -p ~/.config/autostart
-    cp /usr/share/applications/indicator-multiload.desktop ~/.config/autostart/
+  info "Installing indicator-multiload (system load indicator)..."
+  sudo apt install -y indicator-multiload
+  mkdir -p ~/.config/autostart
+  cp /usr/share/applications/indicator-multiload.desktop ~/.config/autostart/
 else
-    success "indicator-multiload is already installed. Skipping."
+  success "indicator-multiload is already installed. Skipping."
 fi
 
 info "Setting GNOME favorites..."
-
 gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
 
 success "🎉 Bootstrap complete."
+
