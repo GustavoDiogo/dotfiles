@@ -1,7 +1,9 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
+# =========================
 # Colors and emojis
+# =========================
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
 RED="\033[1;31m"
@@ -9,259 +11,504 @@ BLUE="\033[1;34m"
 CYAN="\033[1;36m"
 RESET="\033[0m"
 
-info() { echo -e "${BLUE}ℹ️  $1${RESET}"; }
-success() { echo -e "${GREEN}✅ $1${RESET}"; }
-warn() { echo -e "${YELLOW}⚠️  $1${RESET}"; }
-error() { echo -e "${RED}❌ $1${RESET}"; }
+info()    { echo -e "${BLUE}ℹ️  $*${RESET}"; }
+success() { echo -e "${GREEN}✅ $*${RESET}"; }
+warn()    { echo -e "${YELLOW}⚠️  $*${RESET}"; }
+error()   { echo -e "${RED}❌ $*${RESET}"; }
 
-info "🚀 Running YADM bootstrap script..."
+trap 'error " Script failed on line $LINENO"' ERR
 
-sudo apt update
+info "🚀 Running cross-platform bootstrap (Ubuntu/macOS)..."
 
-# Install CLI tools only if not already installed
-cli_tools=(vim curl wget build-essential)
-cli_to_install=()
-for tool in "${cli_tools[@]}"; do
-  if ! dpkg -s "$tool" &> /dev/null; then
-    cli_to_install+=("$tool")
+# =========================
+# OS detection
+# =========================
+OS=""
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  OS="macos"
+elif [[ -f /etc/os-release ]]; then
+  . /etc/os-release
+  if [[ "${ID_LIKE:-}" == *"debian"* || "${ID:-}" == "ubuntu" ]]; then
+    OS="ubuntu"
   fi
-done
-if [ ${#cli_to_install[@]} -ne 0 ]; then
-info "Installing CLI Tools: ${cli_to_install[*]}..."
-  sudo apt install -y "${cli_to_install[@]}"
-else
-success "All CLI Tools already installed. Skipping."
 fi
 
-# Install Shell & Terminal utilities only if not already installed
-shell_utils=(terminator zsh stow zsh-syntax-highlighting zsh-autosuggestions)
-shell_utils_to_install=()
-for util in "${shell_utils[@]}"; do
-  if ! dpkg -s "$util" &> /dev/null; then
-    shell_utils_to_install+=("$util")
+if [[ -z "$OS" ]]; then
+  error "Unsupported OS. This script supports Ubuntu (apt-based) or macOS."
+  exit 1
+fi
+
+# =========================
+# Common helpers
+# =========================
+set_default_shell_to_zsh() {
+  if ! command -v zsh >/dev/null 2>&1; then
+    warn "zsh not found yet; will try again after installation."
+    return 0
   fi
-done
-if [ ${#shell_utils_to_install[@]} -ne 0 ]; then
-info "Installing Shell & Terminal utilities: ${shell_utils_to_install[*]}..."
-  sudo apt install -y "${shell_utils_to_install[@]}"
-else
-success "All Shell & Terminal utilities already installed. Skipping."
-fi
 
-if ! command -v docker &> /dev/null; then
-    info "Installing Docker..."
-    sudo apt install -y docker.io docker-compose
-    sudo systemctl start docker
-    sudo systemctl enable docker
-    sudo usermod -aG docker $USER
-    success "Docker installed and user added to docker group. Please log out and back in for changes to take effect."
-else
-    success "Docker is already installed. Skipping."
-fi
+  local zsh_path
+  zsh_path="$(command -v zsh)"
 
-# Detect OS
-OS="unknown"
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    OS="mac"
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    OS="linux"
-fi
-
-# Install GitHub CLI (gh)
-if ! command -v gh &> /dev/null; then
-    info "Installing GitHub CLI (gh)..."
-    if [ "$OS" == "mac" ]; then
-        # macOS installation using Homebrew
-        if ! command -v brew &> /dev/null; then
-            info "Installing Homebrew first..."
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        fi
-        brew install gh
-    elif [ "$OS" == "linux" ]; then
-        # Linux installation using official repository
-        sudo mkdir -p -m 755 /etc/apt/keyrings
-        wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
-        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-        sudo apt update
-        sudo apt install -y gh
-    fi
-    success "GitHub CLI installed successfully."
-else
-    success "GitHub CLI is already installed. Skipping."
-fi
-
-# Configure GitHub CLI
-if command -v gh &> /dev/null; then
-    # Check if gh is already authenticated (check with token first, then without)
-    GH_ALREADY_AUTHED=false
-    if gh auth status &> /dev/null 2>&1; then
-        GH_ALREADY_AUTHED=true
-    elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
-        # Check if hosts.yml exists which indicates previous auth
-        GH_ALREADY_AUTHED=true
-    fi
-    
-    if [ "$GH_ALREADY_AUTHED" = true ]; then
-        success "GitHub CLI is already authenticated. Skipping."
+  if [[ "$OS" == "macos" ]]; then
+    # Current shell for macOS user
+    local current_shell
+    current_shell="$(dscl . -read "/Users/$USER" UserShell 2>/dev/null | awk '{print $2}' || true)"
+    if [[ "$current_shell" != "$zsh_path" ]]; then
+      info "Setting Zsh as default shell (macOS)..."
+      chsh -s "$zsh_path" || warn "Could not change shell automatically. Change it manually to $zsh_path."
     else
-        info "Configuring GitHub CLI..."
-        # Temporarily unset GH_TOKEN to allow interactive login
-        if [ -n "$GH_TOKEN" ]; then
-            warn "GH_TOKEN environment variable detected. Temporarily unsetting it for interactive login."
-            GH_TOKEN_BACKUP="$GH_TOKEN"
-            unset GH_TOKEN
-        fi
-        warn "GitHub CLI needs authentication. Please follow the prompts to login."
-        gh auth login || warn "Note: SSH key upload may fail if already in use - this is OK."
-        # Restore GH_TOKEN if it was set
-        if [ -n "$GH_TOKEN_BACKUP" ]; then
-            export GH_TOKEN="$GH_TOKEN_BACKUP"
-            unset GH_TOKEN_BACKUP
-        fi
-        success "GitHub CLI configured successfully."
+      success "Zsh already the default shell."
     fi
-fi
+  else
+    # Linux check via /etc/passwd
+    if ! grep -qE "^$(whoami):.*:${zsh_path//\//\\/}$" /etc/passwd; then
+      info "Setting Zsh as default shell (Linux)..."
+      chsh -s "$zsh_path" || warn "Could not change shell automatically. Change it manually to $zsh_path."
+    else
+      success "Zsh already the default shell."
+    fi
+  fi
+}
 
-if ! grep -qE "^$(whoami):.*:$(which zsh)$" /etc/passwd; then
-  info "Setting up Zsh as the default shell..."
-  chsh -s "$(which zsh)"
-else
-  success "Zsh is already the default shell. Skipping."
-fi
+install_oh_my_zsh() {
+  if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
+    info "Installing Oh My Zsh..."
+    RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+  else
+    success "Oh My Zsh already installed."
+  fi
+}
 
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-  info "Installing Oh My Zsh..."
-  RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-else
-  success "Oh My Zsh already installed. Skipping."
-fi
+install_spaceship_theme() {
+  local ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+  if [[ ! -d "$ZSH_CUSTOM/themes/spaceship-prompt" ]]; then
+    info "Installing Spaceship Prompt theme..."
+    mkdir -p "$ZSH_CUSTOM/themes"
+    git clone https://github.com/spaceship-prompt/spaceship-prompt.git \
+      "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1
+  else
+    success "Spaceship Prompt already present."
+  fi
 
-ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
-if [ ! -d "$ZSH_CUSTOM/themes/spaceship-prompt" ]; then
-  info "Downloading and installing Spaceship Prompt theme..."
-  mkdir -p "$ZSH_CUSTOM/themes"
-  chown -R "$USER":"$USER" "$ZSH_CUSTOM"
-  git clone https://github.com/spaceship-prompt/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1
-else
-  success "Spaceship Prompt theme already installed. Skipping clone."
-fi
+  if [[ ! -L "$ZSH_CUSTOM/themes/spaceship.zsh-theme" ]]; then
+    ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" \
+      "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
+  else
+    success "Spaceship Prompt symlink already exists."
+  fi
+}
 
-if [ ! -L "$ZSH_CUSTOM/themes/spaceship.zsh-theme" ]; then
-  ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
-else
-  success "Spaceship Prompt symlink already exists. Skipping."
-fi
+install_nvm_node() {
+  if [[ ! -d "$HOME/.nvm" ]]; then
+    info "📦 Installing NVM & Node LTS..."
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    # shellcheck disable=SC1090
+    source "$NVM_DIR/nvm.sh"
+    nvm install --lts
+    nvm use --lts
+  else
+    success "NVM already installed."
+  fi
+}
 
-if [ ! -d "$HOME/.nvm" ]; then
-  info "📦 Installing NVM and Node.js..."
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-  export NVM_DIR="$HOME/.nvm"
-  source "$NVM_DIR/nvm.sh"
-  nvm install --lts
-  nvm use --lts
-else
-  success "NVM is already installed. Skipping."
-fi
+# =========================
+# macOS helpers (quiet-cask installs)
+# =========================
+brew_cask_installed() { brew list --cask "$1" >/dev/null 2>&1; }
+has_app_bundle() { [[ -d "/Applications/$1.app" || -d "$HOME/Applications/$1.app" ]]; }
 
-if ! command -v code &> /dev/null; then
-    sudo apt-get install wget gpg
+ensure_cask() {
+  # Usage: ensure_cask <cask-token> "<App Bundle Name>"
+  local cask="$1"
+  local appname="$2"
+
+  if brew_cask_installed "$cask" || has_app_bundle "$appname"; then
+    success "$appname already installed."
+    return 0
+  fi
+
+  info "Installing $cask..."
+  # Avoid failing the script if brew says the app already exists or another benign error happens.
+  if brew install --cask "$cask" >/dev/null 2>&1; then
+    success "$appname installed."
+  else
+    if has_app_bundle "$appname"; then
+      success "$appname already installed (detected in /Applications)."
+    else
+      warn "Couldn't install $cask automatically. You can try: brew install --cask $cask"
+    fi
+  fi
+}
+
+# =========================
+# Ubuntu path
+# =========================
+ubuntu_install() {
+  info "🟦 Ubuntu detected"
+
+  sudo apt update
+
+  # CLI tools
+  local cli_tools=(vim curl wget build-essential git ca-certificates gnupg apt-transport-https software-properties-common)
+  local missing=()
+  for t in "${cli_tools[@]}"; do
+    dpkg -s "$t" &>/dev/null || missing+=("$t")
+  done
+  if (( ${#missing[@]} )); then
+    info "Installing CLI tools: ${missing[*]}..."
+    sudo apt install -y "${missing[@]}"
+  else
+    success "All CLI tools already installed."
+  fi
+
+  # Shell & Terminal utilities
+  local shell_utils=(terminator zsh stow zsh-syntax-highlighting zsh-autosuggestions)
+  local missing_shell=()
+  for u in "${shell_utils[@]}"; do
+    dpkg -s "$u" &>/dev/null || missing_shell+=("$u")
+  done
+  if (( ${#missing_shell[@]} )); then
+    info "Installing Shell/Terminal utilities: ${missing_shell[*]}..."
+    sudo apt install -y "${missing_shell[@]}"
+  else
+    success "Shell/Terminal utilities already installed."
+  fi
+
+  # GitHub CLI (gh)
+  if ! command -v gh &>/dev/null; then
+    info "Installing GitHub CLI (gh)..."
+    sudo mkdir -p -m 755 /etc/apt/keyrings
+    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+    sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+    sudo apt update
+    sudo apt install -y gh
+    success "GitHub CLI installed."
+  else
+    success "GitHub CLI already installed."
+  fi
+
+  # Configure GitHub CLI
+  if command -v gh &>/dev/null; then
+    local gh_authed=false
+    if gh auth status &>/dev/null 2>&1; then
+      gh_authed=true
+    elif [[ -f "$HOME/.config/gh/hosts.yml" ]]; then
+      gh_authed=true
+    fi
+
+    if [[ "$gh_authed" == true ]]; then
+      success "GitHub CLI already authenticated."
+    else
+      info "Configuring GitHub CLI..."
+      local gh_token_backup=""
+      if [[ -n "${GH_TOKEN:-}" ]]; then
+        warn "GH_TOKEN detected. Temporarily unsetting for interactive login."
+        gh_token_backup="$GH_TOKEN"
+        unset GH_TOKEN
+      fi
+      warn "GitHub CLI needs authentication. Follow the prompts to login."
+      gh auth login || warn "SSH key upload may fail if already in use - this is OK."
+      if [[ -n "$gh_token_backup" ]]; then
+        export GH_TOKEN="$gh_token_backup"
+      fi
+      success "GitHub CLI configured."
+    fi
+  fi
+
+  # --- Docker Desktop: repair if broken, then install ---
+  is_dd_installed() {
+    # Check multiple indicators for Docker Desktop installation
+    if command -v docker-desktop &>/dev/null; then
+      return 0
+    elif dpkg -l | grep -q '^ii\s\+docker-desktop'; then
+      return 0
+    elif [[ -f /opt/docker-desktop/bin/docker-desktop || -d /opt/docker-desktop ]]; then
+      return 0
+    elif [[ -f /usr/share/applications/docker-desktop.desktop ]]; then
+      return 0
+    fi
+    return 1
+  }
+  is_dd_broken() {
+    dpkg-query -W -f='${Status}\n' docker-desktop 2>/dev/null | grep -qi 'reinstreq'
+  }
+  repair_dd_if_needed() {
+    if is_dd_broken; then
+      warn "docker-desktop broken (reinstreq). Repairing..."
+      sudo dpkg --remove --force-remove-reinstreq docker-desktop || true
+      sudo apt-get -f install -y || true
+      sudo apt --fix-broken install -y || true
+      if dpkg -l | grep -q '^rc\s\+docker-desktop'; then
+        sudo dpkg -P docker-desktop || true
+      fi
+      sudo rm -rf /opt/docker-desktop \
+                  /usr/share/applications/docker-desktop.desktop \
+                  /usr/local/bin/com.docker.cli \
+                  /usr/bin/com.docker.cli || true
+      rm -rf "$HOME/.docker/desktop" "$HOME/.local/share/applications/docker-desktop.desktop" || true
+      sudo rm -f /var/cache/apt/archives/docker-desktop*.deb || true
+      sudo apt-get update
+      success "Repair/Purge steps completed."
+    fi
+  }
+  install_dd() {
+    info "Installing Docker Desktop (Ubuntu)..."
+    sudo apt-get update
+    sudo apt-get install -y gnome-terminal || true
+
+    # Docker apt repo (deps)
+    sudo install -m 0755 -d /etc/apt/keyrings
+    if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    fi
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+      | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+    sudo apt-get update
+
+    # Desktop .deb
+    local DEB_DIR
+    DEB_DIR="$(mktemp -d)"
+    pushd "$DEB_DIR" >/dev/null
+    info "Downloading Docker Desktop package..."
+    curl -fLo docker-desktop-amd64.deb "https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb"
+    sudo apt-get install -y ./docker-desktop-amd64.deb || true
+    sudo usermod -aG docker "$USER" || true
+    popd >/dev/null
+    rm -rf "$DEB_DIR"
+
+    success "Docker Desktop installed. Log out/in so new group memberships apply."
+  }
+  if ! is_dd_installed; then
+    repair_dd_if_needed
+    install_dd
+  else
+    if is_dd_broken; then
+      repair_dd_if_needed
+      install_dd
+    else
+      success "Docker Desktop already installed."
+    fi
+  fi
+  # --- end Docker Desktop ---
+
+  # Zsh default + Oh My Zsh + Spaceship
+  set_default_shell_to_zsh
+  install_oh_my_zsh
+  install_spaceship_theme
+
+  # NVM + Node.js LTS
+  install_nvm_node
+
+  # Visual Studio Code (apt repo)
+  if ! command -v code &>/dev/null; then
+    info "Installing VS Code..."
     wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
     sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
-    echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" |sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+    echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
+      | sudo tee /etc/apt/sources.list.d/vscode.list >/dev/null
     rm -f packages.microsoft.gpg
     sudo apt -y install apt-transport-https
     sudo apt update
-    sudo apt install code 
-else 
-    success "Visual Studio Code is already installed. Skipping."
-fi
+    sudo apt install -y code
+  else
+    success "VS Code already installed."
+  fi
 
-if ! command -v discord &> /dev/null; then
+  # Discord (snap)
+  if ! command -v discord &>/dev/null; then
     info "Installing Discord..."
     sudo snap install discord
-else
-    success "Discord is already installed. Skipping."
-fi
+  else
+    success "Discord already installed."
+  fi
 
 if ! command -v brave-browser &> /dev/null && ! command -v brave &> /dev/null; then
     info "Installing Brave Browser..."
     curl -fsS https://dl.brave.com/install.sh | sh
-else
-    success "Brave Browser is already installed. Skipping."
-fi
+  else
+    success "Brave already installed."
+  fi
 
-if ! command -v google-chrome &> /dev/null; then
+  # Chrome
+  if ! command -v google-chrome &>/dev/null; then
     info "Installing Google Chrome..."
-    wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    apt install -y ./google-chrome-stable_current_amd64.deb
-    rm google-chrome-stable_current_amd64.deb
-else
-    success "Google Chrome is already installed. Skipping."
-fi
+    wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    sudo apt install -y ./google-chrome-stable_current_amd64.deb || true
+    rm -f google-chrome-stable_current_amd64.deb
+  else
+    success "Google Chrome already installed."
+  fi
 
-# Ensure Discord .desktop file exists for GNOME favorites
-if [ -f /var/lib/snapd/desktop/applications/discord_discord.desktop ]; then
-  cp /var/lib/snapd/desktop/applications/discord_discord.desktop ~/.local/share/applications/discord.desktop
-fi
+  # Ensure Discord/Spotify .desktop in local (optional)
+  if [[ -f /var/lib/snapd/desktop/applications/discord_discord.desktop ]]; then
+    mkdir -p ~/.local/share/applications
+    cp /var/lib/snapd/desktop/applications/discord_discord.desktop ~/.local/share/applications/discord.desktop || true
+  fi
 
-# Install Spotify (Snap)
-if ! command -v spotify &> /dev/null; then
+  # Spotify (snap)
+  if ! command -v spotify &>/dev/null; then
     info "Installing Spotify..."
     sudo snap install spotify
-else
-    success "Spotify is already installed. Skipping."
-fi
+  else
+    success "Spotify already installed."
+  fi
+  if [[ -f /var/lib/snapd/desktop/applications/spotify_spotify.desktop ]]; then
+    mkdir -p ~/.local/share/applications
+    cp /var/lib/snapd/desktop/applications/spotify_spotify.desktop ~/.local/share/applications/spotify.desktop || true
+  fi
 
-# Ensure Spotify .desktop file exists for GNOME favorites
-if [ -f /var/lib/snapd/desktop/applications/spotify_spotify.desktop ]; then
-  cp /var/lib/snapd/desktop/applications/spotify_spotify.desktop ~/.local/share/applications/spotify.desktop
-fi
-
-# Install Psensor and dependencies for hardware monitoring
-if ! command -v psensor &> /dev/null; then
-    info "Installing Psensor and hardware monitoring tools..."
+  # Psensor + lm-sensors
+  if ! command -v psensor &>/dev/null; then
+    info "Installing Psensor + lm-sensors..."
     sudo apt install -y psensor lm-sensors
     sudo sensors-detect --auto || true
     sudo systemctl enable --now lm-sensors.service || true
-
-    # Ensure Psensor config exists
     mkdir -p ~/.config/psensor
-    if [ ! -f ~/.config/psensor/psensor.conf ]; then
-      psensor & sleep 10; pkill psensor
+    if [[ ! -f ~/.config/psensor/psensor.conf ]]; then
+      psensor & sleep 10; pkill psensor || true
     fi
-
-    # Set Psensor to show in notification area (system tray) and start hidden
-    sed -i 's/^show_in_notification_area=.*/show_in_notification_area=1/' ~/.config/psensor/psensor.conf
-    sed -i 's/^start_hidden=.*/start_hidden=1/' ~/.config/psensor/psensor.conf
+    sed -i 's/^show_in_notification_area=.*/show_in_notification_area=1/' ~/.config/psensor/psensor.conf || true
+    sed -i 's/^start_hidden=.*/start_hidden=1/' ~/.config/psensor/psensor.conf || true
     grep -q '^show_in_notification_area=' ~/.config/psensor/psensor.conf || echo 'show_in_notification_area=1' >> ~/.config/psensor/psensor.conf
     grep -q '^start_hidden=' ~/.config/psensor/psensor.conf || echo 'start_hidden=1' >> ~/.config/psensor/psensor.conf
-else
-    success "Psensor is already installed. Skipping."
-fi
+  else
+    success "Psensor already installed."
+  fi
 
-# Install indicator-multiload for top panel system monitoring
-if ! dpkg -s indicator-multiload &> /dev/null; then
-    info "Installing indicator-multiload (system load indicator)..."
-    sudo apt install -y indicator-multiload
-    # Add to startup applications
+  # indicator-multiload
+  if ! dpkg -s indicator-multiload &>/dev/null; then
+    info "Installing indicator-multiload..."
+    sudo apt install -y indicator-multiload || warn "indicator-multiload not available on this Ubuntu; skipping."
     mkdir -p ~/.config/autostart
-    cp /usr/share/applications/indicator-multiload.desktop ~/.config/autostart/
-else
-    success "indicator-multiload is already installed. Skipping."
-fi
+    [[ -f /usr/share/applications/indicator-multiload.desktop ]] && cp /usr/share/applications/indicator-multiload.desktop ~/.config/autostart/ || true
+  else
+    success "indicator-multiload already installed."
+  fi
 
-# Set GNOME favorites only if not already configured (skip if user has customized)
-DESIRED_FAVORITES="['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
-CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "@as []")
+  # Set GNOME favorites only if not already configured (skip if user has customized)
+  if command -v gsettings &>/dev/null; then
+    local desired_favorites="['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
+    local current_favorites
+    current_favorites=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "@as []")
 
-# Only set if favorites are empty/default, preserve user customizations
-if [ "$CURRENT_FAVORITES" = "@as []" ] || [ -z "$CURRENT_FAVORITES" ]; then
-    info "Setting GNOME favorites..."
-    gsettings set org.gnome.shell favorite-apps "$DESIRED_FAVORITES"
-    success "GNOME favorites configured."
-else
-    success "GNOME favorites already configured. Skipping."
-fi
+    # Only set if favorites are empty/default, preserve user customizations
+    if [[ "$current_favorites" == "@as []" || -z "$current_favorites" ]]; then
+      info "Setting GNOME favorites..."
+      gsettings set org.gnome.shell favorite-apps "$desired_favorites" || warn "Could not set GNOME favorites."
+      success "GNOME favorites configured."
+    else
+      success "GNOME favorites already configured. Skipping."
+    fi
+  fi
 
-success "🎉 Bootstrap complete."
+  success "🎉 Ubuntu bootstrap complete."
+}
+
+# =========================
+# macOS path
+# =========================
+macos_install() {
+  info "🟩 macOS detected"
+
+  # Command Line Tools
+  if ! xcode-select -p >/dev/null 2>&1; then
+    info "Installing Xcode Command Line Tools..."
+    xcode-select --install || true
+    warn "If a dialog opened, finish installation and re-run script if needed."
+  else
+    success "Xcode Command Line Tools already installed."
+  fi
+
+  # Homebrew
+  if ! command -v brew >/dev/null 2>&1; then
+    info "Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # Add brew to PATH for Apple Silicon/Intel
+    if [[ -d /opt/homebrew/bin ]]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -d /usr/local/bin ]]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+  else
+    success "Homebrew already installed."
+    brew update || true
+  fi
+
+  # CLI tools
+  local brew_cli=(vim curl wget git stow zsh zsh-syntax-highlighting zsh-autosuggestions gh)
+  info "Installing CLI tools via Homebrew..."
+  brew install "${brew_cli[@]}" || true
+
+  # Configure GitHub CLI
+  if command -v gh >/dev/null 2>&1; then
+    local gh_authed=false
+    if gh auth status &>/dev/null 2>&1; then
+      gh_authed=true
+    elif [[ -f "$HOME/.config/gh/hosts.yml" ]]; then
+      gh_authed=true
+    fi
+
+    if [[ "$gh_authed" == true ]]; then
+      success "GitHub CLI already authenticated."
+    else
+      info "Configuring GitHub CLI..."
+      local gh_token_backup=""
+      if [[ -n "${GH_TOKEN:-}" ]]; then
+        warn "GH_TOKEN detected. Temporarily unsetting for interactive login."
+        gh_token_backup="$GH_TOKEN"
+        unset GH_TOKEN
+      fi
+      warn "GitHub CLI needs authentication. Follow the prompts to login."
+      gh auth login || warn "SSH key upload may fail if already in use - this is OK."
+      if [[ -n "$gh_token_backup" ]]; then
+        export GH_TOKEN="$gh_token_backup"
+      fi
+      success "GitHub CLI configured."
+    fi
+  fi
+
+  # Terminal
+  ensure_cask iterm2 "iTerm"
+
+  # Docker Desktop
+  ensure_cask docker "Docker"
+  warn "Open Docker.app manually on first launch to finish setup."
+
+  # Zsh default + Oh My Zsh + Spaceship
+  set_default_shell_to_zsh
+  install_oh_my_zsh
+  install_spaceship_theme
+
+  # NVM + Node.js LTS
+  install_nvm_node
+
+  # VS Code
+  ensure_cask visual-studio-code "Visual Studio Code"
+
+  # Browsers & Apps
+  ensure_cask brave-browser "Brave Browser"
+  ensure_cask google-chrome "Google Chrome"
+  ensure_cask discord "Discord"
+  ensure_cask spotify "Spotify"
+
+  # Linux-only utilities are skipped on macOS
+  info "Skipping Linux-only utilities (psensor, indicator-multiload, gsettings)."
+
+  success "🎉 macOS bootstrap complete."
+}
+
+# =========================
+# Dispatch
+# =========================
+case "$OS" in
+  ubuntu) ubuntu_install ;;
+  macos)  macos_install  ;;
+esac
+
+success "All done! If Docker group was updated (Ubuntu), log out and back in."
+
