@@ -59,6 +59,70 @@ else
     success "Docker is already installed. Skipping."
 fi
 
+# Detect OS
+OS="unknown"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    OS="mac"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    OS="linux"
+fi
+
+# Install GitHub CLI (gh)
+if ! command -v gh &> /dev/null; then
+    info "Installing GitHub CLI (gh)..."
+    if [ "$OS" == "mac" ]; then
+        # macOS installation using Homebrew
+        if ! command -v brew &> /dev/null; then
+            info "Installing Homebrew first..."
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+        brew install gh
+    elif [ "$OS" == "linux" ]; then
+        # Linux installation using official repository
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install -y gh
+    fi
+    success "GitHub CLI installed successfully."
+else
+    success "GitHub CLI is already installed. Skipping."
+fi
+
+# Configure GitHub CLI
+if command -v gh &> /dev/null; then
+    # Check if gh is already authenticated (check with token first, then without)
+    GH_ALREADY_AUTHED=false
+    if gh auth status &> /dev/null 2>&1; then
+        GH_ALREADY_AUTHED=true
+    elif [ -f "$HOME/.config/gh/hosts.yml" ]; then
+        # Check if hosts.yml exists which indicates previous auth
+        GH_ALREADY_AUTHED=true
+    fi
+    
+    if [ "$GH_ALREADY_AUTHED" = true ]; then
+        success "GitHub CLI is already authenticated. Skipping."
+    else
+        info "Configuring GitHub CLI..."
+        # Temporarily unset GH_TOKEN to allow interactive login
+        if [ -n "$GH_TOKEN" ]; then
+            warn "GH_TOKEN environment variable detected. Temporarily unsetting it for interactive login."
+            GH_TOKEN_BACKUP="$GH_TOKEN"
+            unset GH_TOKEN
+        fi
+        warn "GitHub CLI needs authentication. Please follow the prompts to login."
+        gh auth login || warn "Note: SSH key upload may fail if already in use - this is OK."
+        # Restore GH_TOKEN if it was set
+        if [ -n "$GH_TOKEN_BACKUP" ]; then
+            export GH_TOKEN="$GH_TOKEN_BACKUP"
+            unset GH_TOKEN_BACKUP
+        fi
+        success "GitHub CLI configured successfully."
+    fi
+fi
+
 if ! grep -qE "^$(whoami):.*:$(which zsh)$" /etc/passwd; then
   info "Setting up Zsh as the default shell..."
   chsh -s "$(which zsh)"
@@ -120,7 +184,7 @@ else
     success "Discord is already installed. Skipping."
 fi
 
-if ! command -v brave-browser &> /dev/null; then
+if ! command -v brave-browser &> /dev/null && ! command -v brave &> /dev/null; then
     info "Installing Brave Browser..."
     curl -fsS https://dl.brave.com/install.sh | sh
 else
@@ -187,8 +251,17 @@ else
     success "indicator-multiload is already installed. Skipping."
 fi
 
-info "Setting GNOME favorites..."
+# Set GNOME favorites only if not already configured (skip if user has customized)
+DESIRED_FAVORITES="['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
+CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "@as []")
 
-gsettings set org.gnome.shell favorite-apps "['brave-browser.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'terminator.desktop', 'code.desktop', 'discord.desktop', 'spotify.desktop']"
+# Only set if favorites are empty/default, preserve user customizations
+if [ "$CURRENT_FAVORITES" = "@as []" ] || [ -z "$CURRENT_FAVORITES" ]; then
+    info "Setting GNOME favorites..."
+    gsettings set org.gnome.shell favorite-apps "$DESIRED_FAVORITES"
+    success "GNOME favorites configured."
+else
+    success "GNOME favorites already configured. Skipping."
+fi
 
 success "🎉 Bootstrap complete."
