@@ -1,0 +1,7 @@
+# GIMP toolrc
+#
+# This file lists the tool definitions.  This file is only read on startup, so
+# if you change it while GIMP is running, the changes will take effect when
+# you start GIMP again.
+
+# end of toolrc

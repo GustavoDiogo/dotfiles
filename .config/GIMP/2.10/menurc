@@ -1,0 +1,12 @@
+# GIMP menurc
+#
+# This file holds your GIMPs menu definitions, you can edit this file by
+# hand, but it's easier to use File -> Dialogs -> Device Status, Keyboard
+# Shortcuts.
+
+; (gtk_accel_path "<Actions>/plug-in/plug-in-screenshot" "")
+; (gtk_accel_path "<Actions>/file/file-export-as" "<Primary><Shift>e")
+; (gtk_accel_path "<Actions>/file/file-export" "<Primary>e")
+; (gtk_accel_path "<Actions>/file/file-save" "<Primary>s")
+
+# end of menurc
