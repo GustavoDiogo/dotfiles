@@ -113,6 +113,63 @@ install_nvm_node() {
   fi
 }
 
+setup_gimp_config() {
+  info "Setting up GIMP configuration..."
+  
+  # Detect installed GIMP version
+  local gimp_version=""
+  if command -v gimp &>/dev/null; then
+    gimp_version=$(gimp --version 2>/dev/null | grep -oP 'version \K[0-9]+\.[0-9]+' | head -1)
+  fi
+  
+  if [[ -z "$gimp_version" ]]; then
+    warn "GIMP not installed or version not detected. Skipping config setup."
+    return 0
+  fi
+  
+  info "Detected GIMP version: $gimp_version"
+  
+  # Find source config in yadm (check for any version subdirectory)
+  local gimp_src=""
+  if [[ -d "$HOME/.config/GIMP/$gimp_version" ]]; then
+    gimp_src="$HOME/.config/GIMP/$gimp_version"
+  else
+    # Try to find any versioned config directory
+    gimp_src=$(find "$HOME/.config/GIMP" -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | head -1)
+  fi
+  
+  if [[ -z "$gimp_src" || ! -d "$gimp_src" ]]; then
+    warn "No GIMP config found in yadm. Skipping."
+    return 0
+  fi
+  
+  # Determine destination path based on OS
+  local gimp_dest=""
+  if [[ "$OS" == "macos" ]]; then
+    gimp_dest="$HOME/Library/Application Support/GIMP/$gimp_version"
+  else
+    gimp_dest="$HOME/.config/GIMP/$gimp_version"
+  fi
+  
+  # If source exists and destination is different (macOS case)
+  if [[ "$gimp_src" != "$gimp_dest" ]]; then
+    info "Copying GIMP config to $gimp_dest..."
+    mkdir -p "$(dirname "$gimp_dest")"
+    
+    # If destination already exists, back it up
+    if [[ -d "$gimp_dest" ]]; then
+      local backup_path="${gimp_dest}.backup.$(date +%Y%m%d_%H%M%S)"
+      warn "Existing GIMP config found. Backing up to $backup_path"
+      mv "$gimp_dest" "$backup_path"
+    fi
+    
+    cp -r "$gimp_src" "$gimp_dest"
+    success "GIMP config imported to $gimp_dest"
+  else
+    success "GIMP config already in place at $gimp_dest"
+  fi
+}
+
 # =========================
 # macOS helpers (quiet-cask installs)
 # =========================
@@ -362,6 +419,14 @@ if ! command -v brave-browser &> /dev/null && ! command -v brave &> /dev/null; t
     cp /var/lib/snapd/desktop/applications/spotify_spotify.desktop ~/.local/share/applications/spotify.desktop || true
   fi
 
+  # GIMP
+  if ! command -v gimp &>/dev/null; then
+    info "Installing GIMP..."
+    sudo apt install -y gimp
+  else
+    success "GIMP already installed."
+  fi
+  setup_gimp_config
   # Psensor + lm-sensors
   if ! command -v psensor &>/dev/null; then
     info "Installing Psensor + lm-sensors..."
@@ -496,6 +561,9 @@ macos_install() {
   ensure_cask discord "Discord"
   ensure_cask spotify "Spotify"
 
+  # GIMP
+  ensure_cask gimp "GIMP"
+  setup_gimp_config
   # Linux-only utilities are skipped on macOS
   info "Skipping Linux-only utilities (psensor, indicator-multiload, gsettings)."
 
